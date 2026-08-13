@@ -1,0 +1,20 @@
+name: Validate Energy Troubleshooter
+on:
+  pull_request:
+    paths:
+      - "energy_troubleshooter/**"
+      - "tests/test_energy_troubleshooter.py"
+      - ".github/workflows/validate-energy.yml"
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install aiohttp
+      - run: python -m unittest tests/test_energy_troubleshooter.py
+      - run: python -m py_compile energy_troubleshooter/app.py
