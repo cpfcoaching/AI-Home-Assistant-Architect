@@ -68,7 +68,7 @@ async def audit_api(_):
     except Exception as exc: return web.json_response({"error":str(exc),"findings":[]},status=500)
 async def index(_): return web.Response(text=PAGE,content_type="text/html")
 
-app=web.Application();app.router.add_get("/health",health);app.router.add_get("/{tail:.*}/health",health);app.router.add_get("/{tail:.*}/api/audit",audit_api);app.router.add_get("/{tail:.*}",index)
+app=web.Application();app.router.add_get("/health",health);app.router.add_get("/api/audit",audit_api);app.router.add_get("/{tail:.*}/health",health);app.router.add_get("/{tail:.*}/api/audit",audit_api);app.router.add_get("/{tail:.*}",index)
 if __name__=="__main__":
     if not TOKEN: raise SystemExit("SUPERVISOR_TOKEN is required")
     web.run_app(app,host="0.0.0.0",port=8099)

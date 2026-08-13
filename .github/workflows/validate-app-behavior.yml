@@ -1,0 +1,20 @@
+name: Validate app behavior
+on:
+  pull_request:
+    paths:
+      - "energy_troubleshooter/**"
+      - "solar_sentinel/**"
+      - "tests/test_app_behavior_regressions.py"
+      - ".github/workflows/validate-app-behavior.yml"
+permissions:
+  contents: read
+jobs:
+  behavior:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install aiohttp
+      - run: python -m unittest tests/test_app_behavior_regressions.py
