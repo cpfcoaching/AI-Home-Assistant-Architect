@@ -78,24 +78,56 @@ async def ask_ollama(cfg,messages):
             if response.status>=400: raise RuntimeError("Ollama returned %s: %s"%(response.status,body[:300]))
             data=json.loads(body);return data.get("message",{}).get("content","").strip()
 
-async def chat(request):
-    data=await request.json();message=str(data.get("message","")).strip()
-    if not message or len(message)>4000: return web.json_response({"error":"Message must contain 1-4000 characters"},status=400)
-    cfg=options()
-    try: context=select_context(await home_states(),message,cfg["max_context_entities"])
-    except Exception as exc: return web.json_response({"error":"Home Assistant context failed: "+str(exc)},status=502)
+async def append_history(role, content):
     async with lock:
-        history=load_history();recent=history[-cfg["max_history_messages"]:]
-        messages=[{"role":"system","content":SYSTEM},{"role":"system","content":"Relevant Home Assistant context:\n"+json.dumps(context,separators=(",",":"))}]
-        messages.extend({"role":row["role"],"content":row["content"]} for row in recent if row.get("role") in {"user","assistant"})
-        messages.append({"role":"user","content":message})
-        try: answer=await ask_ollama(cfg,messages)
-        except Exception as exc: return web.json_response({"error":"Ollama connection failed: "+str(exc)},status=502)
-        history.extend([{"role":"user","content":message},{"role":"assistant","content":answer}]);save_history(history)
+        rows=load_history()
+        rows.append({"role":role,"content":content})
+        save_history(rows)
+
+async def chat(request):
+    try:
+        data=await request.json()
+    except Exception:
+        return web.json_response({"error":"Request body must be valid JSON"},status=400)
+    message=str(data.get("message","")).strip()
+    if not message or len(message)>4000:
+        return web.json_response({"error":"Message must contain 1-4000 characters"},status=400)
+    safe_message=redact(message)
+    cfg=options()
+
+    # Persist first so a slow or failed downstream call never makes the question disappear.
+    await append_history("user",safe_message)
+    history=load_history()
+    recent=history[:-1][-cfg["max_history_messages"]:]
+
+    try:
+        context=select_context(await home_states(),safe_message,cfg["max_context_entities"])
+    except Exception as exc:
+        error="Home Assistant context failed: "+str(exc)
+        await append_history("assistant",error)
+        return web.json_response({"error":error},status=502)
+
+    messages=[{"role":"system","content":SYSTEM},{"role":"system","content":"Relevant Home Assistant context:\n"+json.dumps(context,separators=(",",":"))}]
+    messages.extend({"role":row["role"],"content":row["content"]} for row in recent if row.get("role") in {"user","assistant"})
+    messages.append({"role":"user","content":safe_message})
+    try:
+        answer=await ask_ollama(cfg,messages)
+    except Exception as exc:
+        error="Ollama connection failed: "+str(exc)
+        await append_history("assistant",error)
+        return web.json_response({"error":error},status=502)
+
+    async with lock:
+        history=load_history()
+        history.append({"role":"assistant","content":answer})
+        save_history(history)
         issue=None
-        if change_request(message):
-            issues=load_issues();issue={"id":len(issues)+1,"status":"pending_review","title":redact(message[:100]),"request":redact(message),"proposal":answer}
-            issues.append(issue);save_issues(issues)
+        if change_request(safe_message):
+            issues=load_issues()
+            next_id=max((int(row.get("id",0)) for row in issues),default=0)+1
+            issue={"id":next_id,"status":"pending_review","title":safe_message[:100],"request":safe_message,"proposal":answer}
+            issues.append(issue)
+            save_issues(issues)
     return web.json_response({"answer":answer,"context_entities":len(context),"execution_enabled":False,"review_issue":issue})
 
 async def history(_): return web.json_response({"messages":load_history()[-20:]})
@@ -108,7 +140,7 @@ async def health(_): return web.json_response({"status":"ok","model":options()["
 PAGE="""<!doctype html><html><head><meta charset=utf-8><meta name=viewport content='width=device-width'><title>Home Architect</title><style>:root{color-scheme:dark;font-family:system-ui;background:#101214;color:#eee}body{margin:0;display:grid;grid-template-rows:auto 1fr auto;height:100vh}header{padding:16px 22px;border-bottom:1px solid #34383d;display:flex;justify-content:space-between}.chat{padding:18px;overflow:auto}.msg,.issue{max-width:850px;padding:14px 16px;margin:10px auto;border-radius:14px;white-space:pre-wrap}.user{background:#075985}.assistant,.issue{background:#1c1f22;border:1px solid #34383d}.issue{border-left:4px solid #f59e0b}.composer{display:flex;gap:10px;padding:16px;border-top:1px solid #34383d}textarea{flex:1;resize:none;border-radius:10px;padding:12px;background:#1c1f22;color:#eee;border:1px solid #444}button{border:0;border-radius:9px;padding:10px 16px;background:#0284c7;color:white}.secondary{background:#444}small{color:#aaa}</style></head><body><header><div><b>Home Architect</b><br><small>Local · changes queued for review · Ollama</small></div><div><button class=secondary id=reviews>Review issues</button> <button class=secondary id=clear>Clear</button></div></header><main class=chat id=chat></main><form class=composer id=form><textarea id=input rows=2 maxlength=4000 placeholder='Ask about solar, climate, SmartHub, Energy costs, or request a change…'></textarea><button>Send</button></form><script>const box=document.getElementById('chat'),input=document.getElementById('input');function add(role,text){let d=document.createElement('div');d.className='msg '+role;d.textContent=text;box.appendChild(d);box.scrollTop=box.scrollHeight}fetch('api/history').then(r=>r.json()).then(d=>(d.messages||[]).forEach(m=>add(m.role,m.content)));form.onsubmit=async e=>{e.preventDefault();let m=input.value.trim();if(!m)return;add('user',m);input.value='';add('assistant','Thinking…');let pending=box.lastChild;try{let r=await fetch('api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:m})}),d=await r.json();pending.textContent=d.answer||d.error||'No response';if(d.review_issue)add('assistant','Created review issue #'+d.review_issue.id+': '+d.review_issue.title)}catch(err){pending.textContent=String(err)}};reviews.onclick=async()=>{let d=await fetch('api/issues').then(r=>r.json());box.replaceChildren();(d.issues||[]).forEach(i=>{let e=document.createElement('div');e.className='issue';e.textContent='#'+i.id+' · '+i.status+'\n'+i.title+'\n\n'+i.proposal;box.appendChild(e)})};clear.onclick=async()=>{await fetch('api/history',{method:'DELETE'});box.replaceChildren()}</script></body></html>"""
 
 async def index(_): return web.Response(text=PAGE,content_type="text/html")
-app=web.Application(client_max_size=8192);app.router.add_get("/{tail:.*}/health",health);app.router.add_get("/{tail:.*}/api/history",history);app.router.add_delete("/{tail:.*}/api/history",clear);app.router.add_get("/{tail:.*}/api/issues",issues);app.router.add_post("/{tail:.*}/api/chat",chat);app.router.add_get("/{tail:.*}",index)
+app=web.Application(client_max_size=8192);app.router.add_get("/health",health);app.router.add_get("/api/history",history);app.router.add_delete("/api/history",clear);app.router.add_get("/api/issues",issues);app.router.add_post("/api/chat",chat);app.router.add_get("/{tail:.*}/health",health);app.router.add_get("/{tail:.*}/api/history",history);app.router.add_delete("/{tail:.*}/api/history",clear);app.router.add_get("/{tail:.*}/api/issues",issues);app.router.add_post("/{tail:.*}/api/chat",chat);app.router.add_get("/{tail:.*}",index)
 if __name__=="__main__":
     if not TOKEN: raise SystemExit("SUPERVISOR_TOKEN is required")
     web.run_app(app,host="0.0.0.0",port=8099)
