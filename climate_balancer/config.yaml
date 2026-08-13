@@ -1,0 +1,33 @@
+name: Whole-Home Climate Balancer
+version: "0.1.0"
+slug: climate_balancer
+description: Read-only three-level comfort and circulation advisor
+url: https://github.com/cpfcoaching/AI-Home-Assistant-Architect
+arch: [amd64]
+startup: application
+boot: auto
+init: false
+homeassistant_api: true
+ingress: true
+ingress_port: 8099
+panel_icon: mdi:home-thermometer
+panel_title: Climate Balancer
+panel_admin: true
+watchdog: http://[HOST]:[PORT:8099]/health
+stage: experimental
+apparmor: true
+backup: hot
+options:
+  summer_upper_limit_f: 75
+  winter_upper_minimum_f: 65
+  imbalance_threshold_f: 3
+  upper_entity_ids: ""
+  main_entity_ids: ""
+  lower_entity_ids: ""
+schema:
+  summer_upper_limit_f: float(65,85)
+  winter_upper_minimum_f: float(50,75)
+  imbalance_threshold_f: float(1,10)
+  upper_entity_ids: str
+  main_entity_ids: str
+  lower_entity_ids: str
