@@ -36,11 +36,18 @@ def api_get(path):
 
 
 def is_solar(state):
+    entity_id = str(state.get("entity_id", ""))
+    domain = entity_id.partition(".")[0]
+    if domain not in {"sensor", "binary_sensor"}:
+        return False
     attrs = state.get("attributes", {})
     text = " ".join(str(v).lower() for v in (
-        state.get("entity_id", ""), attrs.get("friendly_name", ""), attrs.get("device_class", "")
+        entity_id, attrs.get("friendly_name", ""), attrs.get("device_class", "")
     ))
-    return any(hint in text for hint in SOLAR_HINTS)
+    if not any(hint in text for hint in SOLAR_HINTS):
+        return False
+    excluded = ("cost", "compensation", "price", "currency", "automation", "alert")
+    return not any(term in text for term in excluded)
 
 
 def assess(state, cfg):
