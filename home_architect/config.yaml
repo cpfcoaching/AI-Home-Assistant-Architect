@@ -1,0 +1,29 @@
+name: Home Architect
+version: "0.1.0"
+slug: home_architect
+description: Local text assistant for solar, climate, and energy diagnostics
+url: https://github.com/cpfcoaching/AI-Home-Assistant-Architect
+arch: [amd64]
+startup: application
+boot: auto
+init: false
+homeassistant_api: true
+ingress: true
+ingress_port: 8099
+panel_icon: mdi:assistant
+panel_title: Home Architect
+panel_admin: true
+watchdog: http://[HOST]:[PORT:8099]/health
+stage: experimental
+apparmor: true
+backup: hot
+options:
+  ollama_url: "http://ollama:11434"
+  ollama_model: qwen3:8b
+  max_history_messages: 12
+  max_context_entities: 50
+schema:
+  ollama_url: url
+  ollama_model: str
+  max_history_messages: int(2,40)
+  max_context_entities: int(10,200)
