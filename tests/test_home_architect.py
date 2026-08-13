@@ -20,3 +20,9 @@ class ArchitectTests(unittest.TestCase):
         self.assertFalse(app.change_request("why is solar production low?"))
     def test_account_like_numbers_are_redacted(self):
         self.assertEqual(app.redact("NOVEC 6555863001"),"NOVEC [redacted]")
+
+    def test_root_ingress_api_routes_are_registered(self):
+        resources=[resource.canonical for resource in app.app.router.resources()]
+        self.assertIn("/api/history",resources)
+        self.assertIn("/api/issues",resources)
+        self.assertIn("/api/chat",resources)
