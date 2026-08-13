@@ -1,5 +1,5 @@
 name: Whole-Home Climate Balancer
-version: "0.1.0"
+version: "0.1.1"
 slug: climate_balancer
 description: Read-only three-level comfort and circulation advisor
 url: https://github.com/cpfcoaching/AI-Home-Assistant-Architect
