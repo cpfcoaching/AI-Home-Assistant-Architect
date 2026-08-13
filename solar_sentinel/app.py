@@ -56,7 +56,7 @@ def assess(state, cfg):
             age = (datetime.now(timezone.utc) - stamp).total_seconds() / 60
             if age > cfg["stale_after_minutes"]:
                 score -= 35
-                symptoms.append("Telemetry stale for %d minutes" % age)
+                symptoms.append("Telemetry stale for %d minutes" % int(age))
         except ValueError:
             pass
     unit = attrs.get("unit_of_measurement", "")
@@ -121,7 +121,7 @@ def refresh():
 PAGE = """<!doctype html><html><head><meta charset=utf-8><meta name=viewport content='width=device-width'>
 <title>Solar Sentinel</title><style>:root{color-scheme:dark;font-family:system-ui;background:#101214;color:#e8eaed}body{margin:0;padding:24px}header{display:flex;justify-content:space-between;align-items:center}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px}.card{background:#1c1f22;border:1px solid #34383d;border-radius:12px;padding:18px;margin:14px 0}.metric{font-size:2rem;font-weight:700}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:10px;border-bottom:1px solid #34383d}.healthy{color:#4caf50}.watch{color:#ffc107}.degraded,.critical{color:#ff7043}button{background:#03a9f4;border:0;border-radius:8px;color:#fff;padding:10px 14px}small{color:#9aa0a6}</style></head>
 <body><header><div><h1>Solar Sentinel</h1><small>Read-only solar health and inventory</small></div><button onclick='load(true)'>Scan now</button></header><div id=error></div><div class=grid id=summary></div><div class=card><h2>Solar assets</h2><table><thead><tr><th>Asset</th><th>State</th><th>Health</th><th>Finding</th></tr></thead><tbody id=assets></tbody></table></div>
-<script>async function load(force=false){let r=await fetch(force?'api/scan':'api/status',{method:force?'POST':'GET'}),d=await r.json();error.innerHTML=d.error?'<div class="card critical">'+d.error+'</div>':'';let s=d.summary||{};summary.innerHTML=[['System health',s.health_score||0],['Discovered assets',s.assets||0],['Healthy',s.healthy||0],['Need attention',s.attention||0]].map(x=>'<div class=card><small>'+x[0]+'</small><div class=metric>'+x[1]+'</div></div>').join('');assets.innerHTML=(d.assets||[]).map(a=>'<tr><td>'+a.name+'<br><small>'+a.entity_id+'</small></td><td>'+a.state+' '+(a.unit||'')+'</td><td class='+a.status+'>'+a.health_score+' · '+a.status+'</td><td>'+(a.symptoms.join(', ')||'No active finding')+'</td></tr>').join('')}load();setInterval(load,300000)</script></body></html>"""
+<script>const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));async function load(force=false){let r=await fetch(force?'api/scan':'api/status',{method:force?'POST':'GET'}),d=await r.json();error.innerHTML=d.error?'<div class="card critical">'+esc(d.error)+'</div>':'';let s=d.summary||{};summary.innerHTML=[['System health',s.health_score||0],['Discovered assets',s.assets||0],['Healthy',s.healthy||0],['Need attention',s.attention||0]].map(x=>'<div class=card><small>'+esc(x[0])+'</small><div class=metric>'+esc(x[1])+'</div></div>').join('');assets.innerHTML=(d.assets||[]).map(a=>'<tr><td>'+esc(a.name)+'<br><small>'+esc(a.entity_id)+'</small></td><td>'+esc(a.state)+' '+esc(a.unit||'')+'</td><td class='+esc(a.status)+'>'+esc(a.health_score)+' · '+esc(a.status)+'</td><td>'+esc(a.symptoms.join(', ')||'No active finding')+'</td></tr>').join('')}load();setInterval(load,300000)</script></body></html>"""
 
 
 class Handler(BaseHTTPRequestHandler):
