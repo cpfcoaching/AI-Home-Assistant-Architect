@@ -1,0 +1,21 @@
+name: Validate HAOS app packaging
+on:
+  pull_request:
+    paths:
+      - "solar_sentinel/**"
+      - "climate_balancer/**"
+      - "energy_troubleshooter/**"
+      - "home_architect/**"
+      - "tests/test_app_packaging.py"
+      - ".github/workflows/validate-app-packaging.yml"
+permissions:
+  contents: read
+jobs:
+  packaging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m unittest tests/test_app_packaging.py
