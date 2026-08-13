@@ -1,0 +1,22 @@
+import importlib.util, unittest
+from pathlib import Path
+
+try:
+    spec=importlib.util.spec_from_file_location("architect",Path(__file__).parents[1]/"home_architect"/"app.py")
+    app=importlib.util.module_from_spec(spec);spec.loader.exec_module(app)
+except ModuleNotFoundError: app=None
+
+@unittest.skipIf(app is None,"aiohttp not installed")
+class ArchitectTests(unittest.TestCase):
+    def test_energy_question_selects_smarthub_context(self):
+        states=[{"entity_id":"sensor.smarthub_usage","state":"10","attributes":{"friendly_name":"NOVEC usage","unit_of_measurement":"kWh"}},{"entity_id":"light.kitchen","state":"on","attributes":{}}]
+        selected=app.select_context(states,"Why is my electricity cost missing?",50)
+        self.assertEqual([x["entity_id"] for x in selected],["sensor.smarthub_usage"])
+    def test_context_limit(self):
+        states=[{"entity_id":"sensor.solar_%s"%i,"state":"1","attributes":{}} for i in range(10)]
+        self.assertEqual(len(app.select_context(states,"solar",3)),3)
+    def test_change_request_is_queued(self):
+        self.assertTrue(app.change_request("create an automation for the upstairs fan"))
+        self.assertFalse(app.change_request("why is solar production low?"))
+    def test_account_like_numbers_are_redacted(self):
+        self.assertEqual(app.redact("NOVEC 6555863001"),"NOVEC [redacted]")
