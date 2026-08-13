@@ -1,0 +1,30 @@
+name: Solar Sentinel
+version: "0.1.0"
+slug: solar_sentinel
+description: Local-first solar equipment inventory and health monitoring
+url: https://github.com/cpfcoaching/AI-Home-Assistant-Architect
+arch:
+  - amd64
+startup: application
+boot: auto
+init: false
+homeassistant_api: true
+ingress: true
+ingress_port: 8099
+panel_icon: mdi:solar-power
+panel_title: Solar Sentinel
+panel_admin: true
+watchdog: http://[HOST]:[PORT:8099]/health
+stage: experimental
+apparmor: true
+backup: hot
+options:
+  stale_after_minutes: 30
+  low_production_threshold_w: 100
+  ollama_url: ""
+  ollama_model: qwen3:8b
+schema:
+  stale_after_minutes: int(5,1440)
+  low_production_threshold_w: int(0,100000)
+  ollama_url: str?
+  ollama_model: str
