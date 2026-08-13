@@ -1,0 +1,25 @@
+name: Energy Data Troubleshooter
+version: "0.1.0"
+slug: energy_troubleshooter
+description: Read-only SmartHub, Energy dashboard, tariff, and solar-value diagnostics
+url: https://github.com/cpfcoaching/AI-Home-Assistant-Architect
+arch: [amd64]
+startup: application
+boot: auto
+init: false
+homeassistant_api: true
+ingress: true
+ingress_port: 8099
+panel_icon: mdi:transmission-tower-export
+panel_title: Energy Troubleshooter
+panel_admin: true
+watchdog: http://[HOST]:[PORT:8099]/health
+stage: experimental
+apparmor: true
+backup: hot
+options:
+  import_rate_per_kwh: 0
+  export_rate_per_kwh: 0
+schema:
+  import_rate_per_kwh: float(0,10)
+  export_rate_per_kwh: float(0,10)
