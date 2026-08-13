@@ -2,12 +2,32 @@
 profile solar_sentinel flags=(attach_disconnected,mediate_deleted) {
   #include <abstractions/base>
   #include <abstractions/nameservice>
+
+  file,
+  signal (send) set=(kill,term,int,hup,cont),
   network inet stream,
   network inet6 stream,
-  /usr/bin/python3 ix,
+
+  # S6 Overlay startup used by Home Assistant base images
+  /init ix,
+  /bin/** ix,
+  /usr/bin/** ix,
+  /run/{s6,s6-rc*,service}/** ix,
+  /package/** ix,
+  /command/** ix,
+  /etc/services.d/** rwix,
+  /etc/cont-init.d/** rwix,
+  /etc/cont-finish.d/** rwix,
+  /run/{,**} rwk,
+  /dev/tty rw,
+
+  # App entrypoint, runtime, and persistent data
+  /run.sh rix,
+  /usr/lib/bashio/** ix,
   /usr/lib/** mr,
   /lib/** mr,
   /app/** r,
   /data/** rwk,
+  /tmp/** rwk,
   /proc/sys/kernel/random/uuid r,
 }
