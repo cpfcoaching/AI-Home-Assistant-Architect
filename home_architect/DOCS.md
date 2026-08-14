@@ -6,6 +6,8 @@ Version 0.2.0 joins the Home Assistant entity, device, area, and floor registrie
 
 Version 0.2.1 requires a verified indoor temperature sensor for the upper, main, and lower floors before a three-floor mapping can enter the review queue. Equipment temperatures such as solar inverter, battery, CPU, GPU, and drive sensors are excluded. While viewing review issues, **Clear** now clears the review queue rather than chat history.
 
+Version 0.2.2 preserves exact entity IDs even when they contain long numeric device identifiers. Climate prompts also exclude equipment-temperature entities before context is sent to the model.
+
 ## Setup
 
 Configure `ollama_url` with an Ollama endpoint reachable from this App container and select a model such as `qwen3:8b`. The default assumes a resolvable host named `ollama`; replace it with the hostname or IP exposed by your Ollama App. `localhost` normally will not reach a separate App.
