@@ -1,4 +1,4 @@
-import importlib.util, shutil, subprocess, unittest
+import importlib.util, json, shutil, subprocess, tempfile, unittest
 from pathlib import Path
 
 try:
@@ -32,6 +32,25 @@ class ArchitectTests(unittest.TestCase):
         script=app.PAGE.split("<script>",1)[1].split("</script>",1)[0]
         result=subprocess.run(["node","--check"],input=script,text=True,capture_output=True)
         self.assertEqual(result.returncode,0,result.stderr)
+
+    def test_saved_options_are_clamped_to_cpu_safe_limits(self):
+        original=app.OPTIONS
+        try:
+            with tempfile.NamedTemporaryFile(mode="w",delete=False) as handle:
+                json.dump({"max_history_messages":40,"max_context_entities":200,"num_ctx":8192,"num_predict":2000},handle)
+                path=handle.name
+            app.OPTIONS=Path(path)
+            cfg=app.options()
+            self.assertEqual(cfg["max_history_messages"],6)
+            self.assertEqual(cfg["max_context_entities"],20)
+            self.assertEqual(cfg["num_ctx"],4096)
+            self.assertEqual(cfg["num_predict"],512)
+        finally:
+            app.OPTIONS=original
+            Path(path).unlink(missing_ok=True)
+
+    def test_single_inference_lock_exists(self):
+        self.assertIsNotNone(app.inference_lock)
 
     def test_root_ingress_api_routes_are_registered(self):
         resources=[resource.canonical for resource in app.app.router.resources()]
