@@ -1,5 +1,5 @@
 name: Home Architect
-version: "0.1.6"
+version: "0.1.7"
 slug: home_architect
 description: Local text assistant for solar, climate, and energy diagnostics
 url: https://github.com/cpfcoaching/AI-Home-Assistant-Architect
@@ -19,11 +19,15 @@ apparmor: true
 backup: hot
 options:
   ollama_url: "http://ollama:11434"
-  ollama_model: qwen3:8b
-  max_history_messages: 12
-  max_context_entities: 50
+  ollama_model: qwen2.5:1.5b
+  max_history_messages: 4
+  max_context_entities: 15
+  num_ctx: 2048
+  num_predict: 256
 schema:
   ollama_url: url
   ollama_model: str
   max_history_messages: int(2,40)
-  max_context_entities: int(10,200)
+  max_context_entities: int(5,20)
+  num_ctx: int(1024,4096)
+  num_predict: int(64,512)
