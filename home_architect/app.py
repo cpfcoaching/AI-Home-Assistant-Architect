@@ -66,14 +66,14 @@ def context_hints(message):
 def select_context(states,message,limit,registry=None):
     hints=context_hints(message);selected=[];registry=registry or {}
     climate_query=any(word in message.lower() for word in ("climate","temperature","thermostat","hvac","floor","balancer"))
-    equipment_words=("inverter","solar","battery","cpu","gpu","processor","drive","disk","charger","power supply")
+    equipment_words=("inverter","solar","battery","cpu","gpu","processor","drive","disk","charger","power supply","roof","patio","garage","outdoor","outside","weather")
     for state in states:
         attrs=state.get("attributes",{})
-        searchable=" ".join(str(x).lower() for x in (state.get("entity_id",""),attrs.get("friendly_name",""),attrs.get("device_class","")))
+        entity_id=state.get("entity_id","")
+        meta=registry.get(entity_id,{})
+        searchable=" ".join(str(x).lower() for x in (entity_id,attrs.get("friendly_name",""),attrs.get("device_class",""),meta.get("area",""),meta.get("floor",""),meta.get("device","")))
         if climate_query and any(word in searchable for word in equipment_words): continue
         if any(h in searchable for h in hints):
-            entity_id=state.get("entity_id","")
-            meta=registry.get(entity_id,{})
             candidate={"entity_id":entity_id,"state":redact(state.get("state")),"unit":redact(attrs.get("unit_of_measurement")),"name":redact(attrs.get("friendly_name")),"device_class":redact(attrs.get("device_class")),"area":redact(meta.get("area")),"floor":redact(meta.get("floor")),"device":redact(meta.get("device")),"last_updated":state.get("last_updated")}
             score=(20 if meta.get("floor") else 0)+(10 if meta.get("area") else 0)+(8 if attrs.get("device_class")=="temperature" else 0)+(6 if entity_id.startswith("climate.") else 0)+(4 if state.get("state") not in ("unknown","unavailable",None) else 0)
             selected.append((score,candidate))
@@ -137,13 +137,13 @@ def climate_mapping_request(message):
 def floor_bucket(value):
     text=str(value or "").lower()
     if any(word in text for word in ("upper","upstairs","second floor","2nd floor","top floor")): return "upper"
-    if any(word in text for word in ("main","first floor","1st floor","ground floor","living room","kitchen","dining")): return "main"
-    if any(word in text for word in ("lower","downstairs","basement","bottom floor")): return "lower"
+    if any(word in text for word in ("main","first floor","1st floor","living room","kitchen","dining")): return "main"
+    if any(word in text for word in ("lower","downstairs","basement","bottom floor","ground floor","ground")): return "lower"
     return None
 
 def verified_floor_mappings(states,registry):
     """Select one live indoor temperature sensor for each recognized floor."""
-    equipment_words=("inverter","solar","battery","cpu","gpu","processor","drive","disk","charger","power supply")
+    equipment_words=("inverter","solar","battery","cpu","gpu","processor","drive","disk","charger","power supply","roof","patio","garage","outdoor","outside","weather")
     ranked={"upper":[],"main":[],"lower":[]}
     for state in states:
         entity_id=str(state.get("entity_id","")).lower()
