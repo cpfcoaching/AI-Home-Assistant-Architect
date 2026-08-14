@@ -225,7 +225,7 @@ reviewsEl.addEventListener('click',async()=>{
     queued.forEach(issue=>{
       const node=document.createElement('div');
       node.className='issue';
-      node.textContent='#'+issue.id+' · '+issue.status+'\n'+issue.title+'\n\n'+issue.proposal;
+      node.textContent=['#'+issue.id+' · '+issue.status,issue.title,'',issue.proposal].join(String.fromCharCode(10));
       box.appendChild(node);
     });
   }catch(error){
