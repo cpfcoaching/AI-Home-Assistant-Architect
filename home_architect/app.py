@@ -74,7 +74,7 @@ def select_context(states,message,limit,registry=None):
         searchable=" ".join(str(x).lower() for x in (entity_id,attrs.get("friendly_name",""),attrs.get("device_class",""),meta.get("area",""),meta.get("floor",""),meta.get("device","")))
         if climate_query and any(word in searchable for word in equipment_words): continue
         if any(h in searchable for h in hints):
-            candidate={"entity_id":entity_id,"state":redact(state.get("state")),"unit":redact(attrs.get("unit_of_measurement")),"name":redact(attrs.get("friendly_name")),"device_class":redact(attrs.get("device_class")),"area":redact(meta.get("area")),"floor":redact(meta.get("floor")),"device":redact(meta.get("device")),"last_updated":state.get("last_updated")}
+            candidate={"entity_id":entity_id,"state":redact(state.get("state")),"current_temperature":redact(attrs.get("current_temperature")),"unit":redact(attrs.get("unit_of_measurement") or attrs.get("temperature_unit")),"name":redact(attrs.get("friendly_name")),"device_class":redact(attrs.get("device_class")),"area":redact(meta.get("area")),"floor":redact(meta.get("floor")),"device":redact(meta.get("device")),"last_updated":state.get("last_updated")}
             score=(20 if meta.get("floor") else 0)+(10 if meta.get("area") else 0)+(8 if attrs.get("device_class")=="temperature" else 0)+(6 if entity_id.startswith("climate.") else 0)+(4 if state.get("state") not in ("unknown","unavailable",None) else 0)
             selected.append((score,candidate))
     selected.sort(key=lambda row:(-row[0],row[1]["entity_id"]))
@@ -148,15 +148,18 @@ def verified_floor_mappings(states,registry):
     for state in states:
         entity_id=str(state.get("entity_id","")).lower()
         attrs=state.get("attributes",{})
-        if not entity_id.startswith("sensor.") or attrs.get("device_class")!="temperature": continue
-        try: float(state.get("state"))
+        sensor_temperature=entity_id.startswith("sensor.") and attrs.get("device_class")=="temperature"
+        climate_temperature=entity_id.startswith("climate.") and attrs.get("current_temperature") is not None
+        if not (sensor_temperature or climate_temperature): continue
+        value=attrs.get("current_temperature") if climate_temperature else state.get("state")
+        try: float(value)
         except (TypeError,ValueError): continue
         meta=registry.get(state.get("entity_id"),{})
         location=" ".join(str(x or "") for x in (meta.get("floor"),meta.get("area"),attrs.get("friendly_name"),meta.get("device"),entity_id))
         if any(word in location.lower() for word in equipment_words): continue
         bucket=floor_bucket(meta.get("floor")) or floor_bucket(meta.get("area")) or floor_bucket(attrs.get("friendly_name")) or floor_bucket(entity_id)
         if not bucket: continue
-        score=(100 if floor_bucket(meta.get("floor"))==bucket else 0)+(40 if floor_bucket(meta.get("area"))==bucket else 0)+(10 if meta.get("device") else 0)
+        score=(100 if floor_bucket(meta.get("floor"))==bucket else 0)+(40 if floor_bucket(meta.get("area"))==bucket else 0)+(10 if meta.get("device") else 0)+(5 if sensor_temperature else 0)
         ranked[bucket].append((score,entity_id,meta.get("area"),meta.get("floor")))
     return {bucket:sorted(rows,key=lambda row:(-row[0],row[1]))[0] for bucket,rows in ranked.items() if rows}
 
