@@ -1,4 +1,4 @@
-import importlib.util, unittest
+import importlib.util, shutil, subprocess, unittest
 from pathlib import Path
 
 try:
@@ -26,6 +26,12 @@ class ArchitectTests(unittest.TestCase):
         self.assertIn("formEl.addEventListener('submit'",app.PAGE)
         self.assertIn("basePath+'api/'+name",app.PAGE)
         self.assertNotIn("form.onsubmit",app.PAGE)
+
+    @unittest.skipUnless(shutil.which("node"),"node is not installed")
+    def test_generated_browser_script_has_valid_javascript(self):
+        script=app.PAGE.split("<script>",1)[1].split("</script>",1)[0]
+        result=subprocess.run(["node","--check"],input=script,text=True,capture_output=True)
+        self.assertEqual(result.returncode,0,result.stderr)
 
     def test_root_ingress_api_routes_are_registered(self):
         resources=[resource.canonical for resource in app.app.router.resources()]

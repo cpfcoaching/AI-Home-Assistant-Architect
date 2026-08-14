@@ -163,9 +163,23 @@ async function jsonRequest(url,options){
   if(!response.ok) throw new Error(data.error||('Request failed: '+response.status));
   return data;
 }
-jsonRequest(apiUrl('history')).then(data=>{
-  (data.messages||[]).forEach(message=>add(message.role,message.content));
-}).catch(error=>add('assistant','Could not load history: '+error.message));
+let reviewMode=false;
+async function loadHistory(){
+  reviewMode=false;
+  reviewsEl.textContent='Review issues';
+  box.replaceChildren();
+  try{
+    const data=await jsonRequest(apiUrl('history'));
+    if(!(data.messages||[]).length){
+      add('assistant','No conversation history yet. Ask a question below.');
+    }else{
+      data.messages.forEach(message=>add(message.role,message.content));
+    }
+  }catch(error){
+    add('assistant','Could not load history: '+error.message);
+  }
+}
+loadHistory();
 formEl.addEventListener('submit',async event=>{
   event.preventDefault();
   const message=input.value.trim();
@@ -192,17 +206,30 @@ formEl.addEventListener('submit',async event=>{
   }
 });
 reviewsEl.addEventListener('click',async()=>{
+  if(reviewMode){
+    await loadHistory();
+    return;
+  }
+  reviewMode=true;
+  reviewsEl.textContent='Back to chat';
+  box.replaceChildren();
+  const loading=add('assistant','Loading queued changes…');
   try{
     const data=await jsonRequest(apiUrl('issues'));
     box.replaceChildren();
-    (data.issues||[]).forEach(issue=>{
+    const queued=data.issues||[];
+    if(!queued.length){
+      add('assistant','No queued changes for review. A queue item is created after a change request receives a successful Ollama proposal.');
+      return;
+    }
+    queued.forEach(issue=>{
       const node=document.createElement('div');
       node.className='issue';
-      node.textContent='#'+issue.id+' · '+issue.status+'\n'+issue.title+'\n\n'+issue.proposal;
+      node.textContent=['#'+issue.id+' · '+issue.status,issue.title,'',issue.proposal].join(String.fromCharCode(10));
       box.appendChild(node);
     });
   }catch(error){
-    add('assistant','Could not load review issues: '+error.message);
+    loading.textContent='Could not load review issues: '+error.message;
   }
 });
 clearEl.addEventListener('click',async()=>{
