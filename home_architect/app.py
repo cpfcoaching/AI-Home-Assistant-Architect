@@ -137,7 +137,83 @@ async def clear(_):
 async def issues(_): return web.json_response({"issues":load_issues()[-50:]})
 async def health(_): return web.json_response({"status":"ok","model":options()["ollama_model"]})
 
-PAGE="""<!doctype html><html><head><meta charset=utf-8><meta name=viewport content='width=device-width'><title>Home Architect</title><style>:root{color-scheme:dark;font-family:system-ui;background:#101214;color:#eee}body{margin:0;display:grid;grid-template-rows:auto 1fr auto;height:100vh}header{padding:16px 22px;border-bottom:1px solid #34383d;display:flex;justify-content:space-between}.chat{padding:18px;overflow:auto}.msg,.issue{max-width:850px;padding:14px 16px;margin:10px auto;border-radius:14px;white-space:pre-wrap}.user{background:#075985}.assistant,.issue{background:#1c1f22;border:1px solid #34383d}.issue{border-left:4px solid #f59e0b}.composer{display:flex;gap:10px;padding:16px;border-top:1px solid #34383d}textarea{flex:1;resize:none;border-radius:10px;padding:12px;background:#1c1f22;color:#eee;border:1px solid #444}button{border:0;border-radius:9px;padding:10px 16px;background:#0284c7;color:white}.secondary{background:#444}small{color:#aaa}</style></head><body><header><div><b>Home Architect</b><br><small>Local · changes queued for review · Ollama</small></div><div><button class=secondary id=reviews>Review issues</button> <button class=secondary id=clear>Clear</button></div></header><main class=chat id=chat></main><form class=composer id=form><textarea id=input rows=2 maxlength=4000 placeholder='Ask about solar, climate, SmartHub, Energy costs, or request a change…'></textarea><button>Send</button></form><script>const box=document.getElementById('chat'),input=document.getElementById('input');function add(role,text){let d=document.createElement('div');d.className='msg '+role;d.textContent=text;box.appendChild(d);box.scrollTop=box.scrollHeight}fetch('api/history').then(r=>r.json()).then(d=>(d.messages||[]).forEach(m=>add(m.role,m.content)));form.onsubmit=async e=>{e.preventDefault();let m=input.value.trim();if(!m)return;add('user',m);input.value='';add('assistant','Thinking…');let pending=box.lastChild;try{let r=await fetch('api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:m})}),d=await r.json();pending.textContent=d.answer||d.error||'No response';if(d.review_issue)add('assistant','Created review issue #'+d.review_issue.id+': '+d.review_issue.title)}catch(err){pending.textContent=String(err)}};reviews.onclick=async()=>{let d=await fetch('api/issues').then(r=>r.json());box.replaceChildren();(d.issues||[]).forEach(i=>{let e=document.createElement('div');e.className='issue';e.textContent='#'+i.id+' · '+i.status+'\n'+i.title+'\n\n'+i.proposal;box.appendChild(e)})};clear.onclick=async()=>{await fetch('api/history',{method:'DELETE'});box.replaceChildren()}</script></body></html>"""
+PAGE="""<!doctype html><html><head><meta charset=utf-8><meta name=viewport content='width=device-width'><title>Home Architect</title><style>:root{color-scheme:dark;font-family:system-ui;background:#101214;color:#eee}body{margin:0;display:grid;grid-template-rows:auto 1fr auto;height:100vh}header{padding:16px 22px;border-bottom:1px solid #34383d;display:flex;justify-content:space-between}.chat{padding:18px;overflow:auto}.msg,.issue{max-width:850px;padding:14px 16px;margin:10px auto;border-radius:14px;white-space:pre-wrap}.user{background:#075985}.assistant,.issue{background:#1c1f22;border:1px solid #34383d}.issue{border-left:4px solid #f59e0b}.composer{display:flex;gap:10px;padding:16px;border-top:1px solid #34383d}textarea{flex:1;resize:none;border-radius:10px;padding:12px;background:#1c1f22;color:#eee;border:1px solid #444}button{border:0;border-radius:9px;padding:10px 16px;background:#0284c7;color:white}.secondary{background:#444}small{color:#aaa}</style></head><body><header><div><b>Home Architect</b><br><small>Local · changes queued for review · Ollama</small></div><div><button class=secondary id=reviews>Review issues</button> <button class=secondary id=clear>Clear</button></div></header><main class=chat id=chat></main><form class=composer id=form><textarea id=input rows=2 maxlength=4000 placeholder='Ask about solar, climate, SmartHub, Energy costs, or request a change…'></textarea><button>Send</button></form><script>
+const box=document.getElementById('chat');
+const input=document.getElementById('input');
+const formEl=document.getElementById('form');
+const reviewsEl=document.getElementById('reviews');
+const clearEl=document.getElementById('clear');
+const basePath=location.pathname.endsWith('/')?location.pathname:location.pathname+'/';
+const apiUrl=name=>basePath+'api/'+name;
+function add(role,text){
+  const node=document.createElement('div');
+  node.className='msg '+role;
+  node.textContent=text;
+  box.appendChild(node);
+  box.scrollTop=box.scrollHeight;
+  return node;
+}
+async function jsonRequest(url,options){
+  const response=await fetch(url,options);
+  const type=response.headers.get('content-type')||'';
+  if(!type.includes('application/json')){
+    throw new Error('Home Architect API returned '+response.status+' '+type);
+  }
+  const data=await response.json();
+  if(!response.ok) throw new Error(data.error||('Request failed: '+response.status));
+  return data;
+}
+jsonRequest(apiUrl('history')).then(data=>{
+  (data.messages||[]).forEach(message=>add(message.role,message.content));
+}).catch(error=>add('assistant','Could not load history: '+error.message));
+formEl.addEventListener('submit',async event=>{
+  event.preventDefault();
+  const message=input.value.trim();
+  if(!message) return;
+  add('user',message);
+  const pending=add('assistant','Thinking…');
+  input.value='';
+  input.disabled=true;
+  try{
+    const data=await jsonRequest(apiUrl('chat'),{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({message})
+    });
+    pending.textContent=data.answer||'No response';
+    if(data.review_issue){
+      add('assistant','Created review issue #'+data.review_issue.id+': '+data.review_issue.title);
+    }
+  }catch(error){
+    pending.textContent='Request failed: '+error.message;
+  }finally{
+    input.disabled=false;
+    input.focus();
+  }
+});
+reviewsEl.addEventListener('click',async()=>{
+  try{
+    const data=await jsonRequest(apiUrl('issues'));
+    box.replaceChildren();
+    (data.issues||[]).forEach(issue=>{
+      const node=document.createElement('div');
+      node.className='issue';
+      node.textContent='#'+issue.id+' · '+issue.status+'\n'+issue.title+'\n\n'+issue.proposal;
+      box.appendChild(node);
+    });
+  }catch(error){
+    add('assistant','Could not load review issues: '+error.message);
+  }
+});
+clearEl.addEventListener('click',async()=>{
+  try{
+    await jsonRequest(apiUrl('history'),{method:'DELETE'});
+    box.replaceChildren();
+  }catch(error){
+    add('assistant','Could not clear history: '+error.message);
+  }
+});
+</script></body></html>"""
 
 async def index(_): return web.Response(text=PAGE,content_type="text/html")
 app=web.Application(client_max_size=8192);app.router.add_get("/health",health);app.router.add_get("/api/history",history);app.router.add_delete("/api/history",clear);app.router.add_get("/api/issues",issues);app.router.add_post("/api/chat",chat);app.router.add_get("/{tail:.*}/health",health);app.router.add_get("/{tail:.*}/api/history",history);app.router.add_delete("/{tail:.*}/api/history",clear);app.router.add_get("/{tail:.*}/api/issues",issues);app.router.add_post("/{tail:.*}/api/chat",chat);app.router.add_get("/{tail:.*}",index)

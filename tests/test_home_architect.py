@@ -21,6 +21,12 @@ class ArchitectTests(unittest.TestCase):
     def test_account_like_numbers_are_redacted(self):
         self.assertEqual(app.redact("NOVEC 6555863001"),"NOVEC [redacted]")
 
+    def test_browser_uses_explicit_dom_references_and_ingress_path(self):
+        self.assertIn("document.getElementById('form')",app.PAGE)
+        self.assertIn("formEl.addEventListener('submit'",app.PAGE)
+        self.assertIn("basePath+'api/'+name",app.PAGE)
+        self.assertNotIn("form.onsubmit",app.PAGE)
+
     def test_root_ingress_api_routes_are_registered(self):
         resources=[resource.canonical for resource in app.app.router.resources()]
         self.assertIn("/api/history",resources)
