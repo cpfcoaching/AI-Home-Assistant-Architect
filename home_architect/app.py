@@ -122,10 +122,51 @@ async def home_context(message,limit):
     except Exception as exc:
         registry={}
         registry_status="unavailable: "+str(exc)
-    return states,select_context(states,message,limit,registry),registry_status
+    return states,select_context(states,message,limit,registry),registry_status,registry
 
 def entity_ids(text):
     return set(re.findall(r"\b(?:sensor|binary_sensor|climate|fan)\.[a-z0-9_]+\b",text.lower()))
+
+def climate_mapping_request(message):
+    text=message.lower()
+    return any(word in text for word in ("climate","temperature","thermostat","hvac")) and any(word in text for word in ("floor","level","map","balancer"))
+
+def floor_bucket(value):
+    text=str(value or "").lower()
+    if any(word in text for word in ("upper","upstairs","second floor","2nd floor","top floor")): return "upper"
+    if any(word in text for word in ("main","first floor","1st floor","ground floor","living room","kitchen","dining")): return "main"
+    if any(word in text for word in ("lower","downstairs","basement","bottom floor")): return "lower"
+    return None
+
+def verified_floor_mappings(states,registry):
+    """Select one live indoor temperature sensor for each recognized floor."""
+    equipment_words=("inverter","solar","battery","cpu","gpu","processor","drive","disk","charger","power supply")
+    ranked={"upper":[],"main":[],"lower":[]}
+    for state in states:
+        entity_id=str(state.get("entity_id","")).lower()
+        attrs=state.get("attributes",{})
+        if not entity_id.startswith("sensor.") or attrs.get("device_class")!="temperature": continue
+        try: float(state.get("state"))
+        except (TypeError,ValueError): continue
+        meta=registry.get(state.get("entity_id"),{})
+        location=" ".join(str(x or "") for x in (meta.get("floor"),meta.get("area"),attrs.get("friendly_name"),meta.get("device"),entity_id))
+        if any(word in location.lower() for word in equipment_words): continue
+        bucket=floor_bucket(meta.get("floor")) or floor_bucket(meta.get("area")) or floor_bucket(attrs.get("friendly_name")) or floor_bucket(entity_id)
+        if not bucket: continue
+        score=(100 if floor_bucket(meta.get("floor"))==bucket else 0)+(40 if floor_bucket(meta.get("area"))==bucket else 0)+(10 if meta.get("device") else 0)
+        ranked[bucket].append((score,entity_id,meta.get("area"),meta.get("floor")))
+    return {bucket:sorted(rows,key=lambda row:(-row[0],row[1]))[0] for bucket,rows in ranked.items() if rows}
+
+def mapping_summary(mappings):
+    lines=["VERIFIED REGISTRY MAPPINGS:"]
+    for floor in ("upper","main","lower"):
+        if floor in mappings:
+            _,entity_id,area,registered_floor=mappings[floor]
+            location=" / ".join(str(x) for x in (registered_floor,area) if x)
+            lines.append("- %s: %s%s"%(floor,entity_id," ("+location+")" if location else ""))
+        else:
+            lines.append("- %s: unmapped; no verified indoor temperature sensor was associated with this floor"%floor)
+    return "\n".join(lines)
 
 async def ask_ollama(cfg,messages):
     url=cfg["ollama_url"].rstrip("/")+"/api/chat"
@@ -159,11 +200,15 @@ async def chat(request):
     recent=history[:-1][-cfg["max_history_messages"]:]
 
     try:
-        states,context,registry_status=await home_context(safe_message,cfg["max_context_entities"])
+        states,context,registry_status,registry=await home_context(safe_message,cfg["max_context_entities"])
     except Exception as exc:
         error="Home Assistant context failed: "+str(exc)
         await append_history("assistant",error)
         return web.json_response({"error":error},status=502)
+
+    mappings=verified_floor_mappings(states,registry) if climate_mapping_request(safe_message) else {}
+    if climate_mapping_request(safe_message):
+        answer=answer+"\n\n"+mapping_summary(mappings)
 
     messages=[{"role":"system","content":SYSTEM},{"role":"system","content":"Registry status: "+registry_status+"\nVerified Home Assistant entities:\n"+json.dumps(context,separators=(",",":"))}]
     messages.extend({"role":row["role"],"content":row["content"]} for row in recent if row.get("role") in {"user","assistant"})
@@ -187,8 +232,10 @@ async def chat(request):
         issue=None
         if change_request(safe_message):
             invalid=sorted(entity_ids(answer)-{str(row.get("entity_id","")).lower() for row in states})
-            if invalid:
-                warning="Proposal not queued because it referenced unverified entity IDs: "+", ".join(invalid)
+            missing_mapping=climate_mapping_request(safe_message) and len(mappings)<3
+            if invalid or missing_mapping:
+                missing=", ".join(floor for floor in ("upper","main","lower") if floor not in mappings)
+                warning=("Proposal not queued because it referenced unverified entity IDs: "+", ".join(invalid)) if invalid else "Proposal not queued because verified indoor temperature sensors are missing for: "+missing+". Assign sensors to Home Assistant areas and floors, then retry."
                 answer=answer+"\n\nVALIDATION BLOCKED: "+warning
                 history[-1]["content"]=answer
                 save_history(history)
@@ -205,6 +252,9 @@ async def clear(_):
     async with lock: save_history([])
     return web.json_response({"cleared":True})
 async def issues(_): return web.json_response({"issues":load_issues()[-50:]})
+async def clear_issues(_):
+    async with lock: save_issues([])
+    return web.json_response({"cleared":True})
 async def health(_): return web.json_response({"status":"ok","model":options()["ollama_model"]})
 
 PAGE="""<!doctype html><html><head><meta charset=utf-8><meta name=viewport content='width=device-width'><title>Home Architect</title><style>:root{color-scheme:dark;font-family:system-ui;background:#101214;color:#eee}body{margin:0;display:grid;grid-template-rows:auto 1fr auto;height:100vh}header{padding:16px 22px;border-bottom:1px solid #34383d;display:flex;justify-content:space-between}.chat{padding:18px;overflow:auto}.msg,.issue{max-width:850px;padding:14px 16px;margin:10px auto;border-radius:14px;white-space:pre-wrap}.user{background:#075985}.assistant,.issue{background:#1c1f22;border:1px solid #34383d}.issue{border-left:4px solid #f59e0b}.composer{display:flex;gap:10px;padding:16px;border-top:1px solid #34383d}textarea{flex:1;resize:none;border-radius:10px;padding:12px;background:#1c1f22;color:#eee;border:1px solid #444}button{border:0;border-radius:9px;padding:10px 16px;background:#0284c7;color:white}.secondary{background:#444}small{color:#aaa}</style></head><body><header><div><b>Home Architect</b><br><small>Local · changes queued for review · Ollama</small></div><div><button class=secondary id=reviews>Review issues</button> <button class=secondary id=clear>Clear</button></div></header><main class=chat id=chat></main><form class=composer id=form><textarea id=input rows=2 maxlength=4000 placeholder='Ask about solar, climate, SmartHub, Energy costs, or request a change…'></textarea><button>Send</button></form><script>
@@ -304,8 +354,9 @@ reviewsEl.addEventListener('click',async()=>{
 });
 clearEl.addEventListener('click',async()=>{
   try{
-    await jsonRequest(apiUrl('history'),{method:'DELETE'});
+    await jsonRequest(apiUrl(reviewMode?'issues':'history'),{method:'DELETE'});
     box.replaceChildren();
+    if(reviewMode) add('assistant','Review queue cleared.');
   }catch(error){
     add('assistant','Could not clear history: '+error.message);
   }
@@ -313,7 +364,7 @@ clearEl.addEventListener('click',async()=>{
 </script></body></html>"""
 
 async def index(_): return web.Response(text=PAGE,content_type="text/html")
-app=web.Application(client_max_size=8192);app.router.add_get("/health",health);app.router.add_get("/api/history",history);app.router.add_delete("/api/history",clear);app.router.add_get("/api/issues",issues);app.router.add_post("/api/chat",chat);app.router.add_get("/{tail:.*}/health",health);app.router.add_get("/{tail:.*}/api/history",history);app.router.add_delete("/{tail:.*}/api/history",clear);app.router.add_get("/{tail:.*}/api/issues",issues);app.router.add_post("/{tail:.*}/api/chat",chat);app.router.add_get("/{tail:.*}",index)
+app=web.Application(client_max_size=8192);app.router.add_get("/health",health);app.router.add_get("/api/history",history);app.router.add_delete("/api/history",clear);app.router.add_get("/api/issues",issues);app.router.add_delete("/api/issues",clear_issues);app.router.add_post("/api/chat",chat);app.router.add_get("/{tail:.*}/health",health);app.router.add_get("/{tail:.*}/api/history",history);app.router.add_delete("/{tail:.*}/api/history",clear);app.router.add_get("/{tail:.*}/api/issues",issues);app.router.add_delete("/{tail:.*}/api/issues",clear_issues);app.router.add_post("/{tail:.*}/api/chat",chat);app.router.add_get("/{tail:.*}",index)
 if __name__=="__main__":
     if not TOKEN: raise SystemExit("SUPERVISOR_TOKEN is required")
     web.run_app(app,host="0.0.0.0",port=8099)
