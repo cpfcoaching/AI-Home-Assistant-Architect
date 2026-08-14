@@ -10,6 +10,8 @@ Version 0.2.2 preserves exact entity IDs even when they contain long numeric dev
 
 Version 0.2.3 recognizes Second Floor, First Floor, and Ground as upper, main, and lower respectively. Roof, patio, garage, outdoor, and weather temperature entities are excluded from indoor mappings.
 
+Version 0.2.4 accepts either numeric temperature sensors or verified thermostat entities that expose a numeric `current_temperature` attribute.
+
 ## Setup
 
 Configure `ollama_url` with an Ollama endpoint reachable from this App container and select a model such as `qwen3:8b`. The default assumes a resolvable host named `ollama`; replace it with the hostname or IP exposed by your Ollama App. `localhost` normally will not reach a separate App.
