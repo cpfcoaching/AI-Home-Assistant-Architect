@@ -207,8 +207,6 @@ async def chat(request):
         return web.json_response({"error":error},status=502)
 
     mappings=verified_floor_mappings(states,registry) if climate_mapping_request(safe_message) else {}
-    if climate_mapping_request(safe_message):
-        answer=answer+"\n\n"+mapping_summary(mappings)
 
     messages=[{"role":"system","content":SYSTEM},{"role":"system","content":"Registry status: "+registry_status+"\nVerified Home Assistant entities:\n"+json.dumps(context,separators=(",",":"))}]
     messages.extend({"role":row["role"],"content":row["content"]} for row in recent if row.get("role") in {"user","assistant"})
@@ -224,6 +222,9 @@ async def chat(request):
         error="Ollama connection failed: "+str(exc)
         await append_history("assistant",error)
         return web.json_response({"error":error},status=502)
+
+    if climate_mapping_request(safe_message):
+        answer=answer+"\n\n"+mapping_summary(mappings)
 
     async with lock:
         history=load_history()
