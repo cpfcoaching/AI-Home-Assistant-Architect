@@ -18,9 +18,11 @@ def states():
     with urllib.request.urlopen(req,timeout=15) as response: return json.load(response)
 
 def fahrenheit(state):
-    try: value=float(state["state"])
+    attrs=state.get("attributes",{})
+    raw=attrs.get("current_temperature") if str(state.get("entity_id","")).startswith("climate.") else state.get("state")
+    try: value=float(raw)
     except (KeyError,ValueError,TypeError): return None
-    unit=state.get("attributes",{}).get("unit_of_measurement")
+    unit=attrs.get("unit_of_measurement") or attrs.get("temperature_unit")
     return value*9/5+32 if unit=="°C" else value
 
 def snapshot():
