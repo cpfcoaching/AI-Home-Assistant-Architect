@@ -1,0 +1,55 @@
+{
+  "__inputs": [{"name":"DS_INFLUXDB","label":"InfluxDB datasource","description":"Select either verified InfluxDB datasource","type":"datasource","pluginId":"influxdb","pluginName":"InfluxDB"}],
+  "annotations":{"list":[]},
+  "editable":true,
+  "graphTooltip":1,
+  "id":null,
+  "links":[],
+  "panels":[
+    {
+      "datasource":{"type":"influxdb","uid":"${DS_INFLUXDB}"},
+      "fieldConfig":{"defaults":{"color":{"mode":"thresholds"},"thresholds":{"mode":"absolute","steps":[{"color":"green","value":null}]},"unit":"watt"},"overrides":[]},
+      "gridPos":{"h":5,"w":6,"x":0,"y":0},
+      "id":1,
+      "options":{"colorMode":"value","graphMode":"area","justifyMode":"auto","orientation":"auto","reduceOptions":{"calcs":["lastNotNull"],"fields":"","values":false},"textMode":"auto"},
+      "targets":[{"datasource":{"type":"influxdb","uid":"${DS_INFLUXDB}"},"query":"SELECT sum(\"last\") FROM (SELECT last(\"value\") AS \"last\" FROM \"$power_measurement\" WHERE \"entity_id\" =~ /^inverter_.*_power$/ AND $timeFilter GROUP BY \"entity_id\")","rawQuery":true,"refId":"A","resultFormat":"time_series"}],
+      "title":"Current inverter production","type":"stat"
+    },
+    {
+      "datasource":{"type":"influxdb","uid":"${DS_INFLUXDB}"},
+      "fieldConfig":{"defaults":{"unit":"watt"},"overrides":[]},
+      "gridPos":{"h":9,"w":18,"x":6,"y":0},
+      "id":2,
+      "options":{"legend":{"calcs":["lastNotNull","mean"],"displayMode":"table","placement":"right","showLegend":true},"tooltip":{"mode":"multi","sort":"desc"}},
+      "targets":[{"alias":"$tag_entity_id","datasource":{"type":"influxdb","uid":"${DS_INFLUXDB}"},"query":"SELECT mean(\"value\") FROM \"$power_measurement\" WHERE \"entity_id\" =~ /^inverter_.*_power$/ AND $timeFilter GROUP BY time($__interval), \"entity_id\" fill(null)","rawQuery":true,"refId":"A","resultFormat":"time_series"}],
+      "title":"Panel inverter production","type":"timeseries"
+    },
+    {
+      "datasource":{"type":"influxdb","uid":"${DS_INFLUXDB}"},
+      "fieldConfig":{"defaults":{"min":0,"unit":"watt"},"overrides":[]},
+      "gridPos":{"h":10,"w":12,"x":0,"y":9},
+      "id":3,
+      "options":{"displayMode":"gradient","minVizHeight":10,"minVizWidth":0,"namePlacement":"auto","orientation":"horizontal","reduceOptions":{"calcs":["lastNotNull"],"fields":"","values":false},"showUnfilled":true,"sizing":"auto","valueMode":"color"},
+      "targets":[{"alias":"$tag_entity_id","datasource":{"type":"influxdb","uid":"${DS_INFLUXDB}"},"query":"SELECT last(\"value\") FROM \"$power_measurement\" WHERE \"entity_id\" =~ /^inverter_.*_power$/ AND $timeFilter GROUP BY \"entity_id\"","rawQuery":true,"refId":"A","resultFormat":"time_series"}],
+      "title":"Current output by panel","type":"bargauge"
+    },
+    {
+      "datasource":{"type":"influxdb","uid":"${DS_INFLUXDB}"},
+      "fieldConfig":{"defaults":{"unit":"watt"},"overrides":[]},
+      "gridPos":{"h":10,"w":12,"x":12,"y":9},
+      "id":4,
+      "options":{"legend":{"calcs":["lastNotNull"],"displayMode":"table","placement":"bottom","showLegend":true},"tooltip":{"mode":"multi","sort":"none"}},
+      "targets":[{"alias":"$tag_entity_id","datasource":{"type":"influxdb","uid":"${DS_INFLUXDB}"},"query":"SELECT mean(\"value\") FROM \"$power_measurement\" WHERE \"entity_id\" =~ /^power_meter_pvs6.*power$/ AND $timeFilter GROUP BY time($__interval), \"entity_id\" fill(null)","rawQuery":true,"refId":"A","resultFormat":"time_series"}],
+      "title":"Grid and home power meter","type":"timeseries"
+    }
+  ],
+  "refresh":"1m",
+  "schemaVersion":40,
+  "tags":["solar-assistant","production","home-assistant"],
+  "templating":{"list":[{"current":{"selected":true,"text":"W","value":"W"},"hide":0,"label":"Power measurement","name":"power_measurement","options":[{"selected":true,"text":"W","value":"W"},{"selected":false,"text":"state","value":"state"}],"query":"W,state","skipUrlSync":false,"type":"custom"}]},
+  "time":{"from":"now-24h","to":"now"},
+  "timezone":"browser",
+  "title":"Solar Assistant - Production Central",
+  "uid":"solar-assistant-production",
+  "version":1
+}
