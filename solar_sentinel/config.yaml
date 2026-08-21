@@ -1,5 +1,5 @@
-name: Solar Sentinel
-version: "0.2.0"
+name: Solar Assistant
+version: "0.2.1"
 slug: solar_sentinel
 description: Local-first solar equipment inventory and health monitoring
 url: https://github.com/cpfcoaching/AI-Home-Assistant-Architect
@@ -12,7 +12,7 @@ homeassistant_api: true
 ingress: true
 ingress_port: 8099
 panel_icon: mdi:solar-power
-panel_title: Solar Sentinel
+panel_title: Solar Assistant
 panel_admin: true
 watchdog: http://[HOST]:[PORT:8099]/health
 stage: experimental
