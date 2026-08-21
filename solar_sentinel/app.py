@@ -83,6 +83,8 @@ def daylight_context(states, cfg):
 
 
 def is_inverter_power(state):
+    if str(state.get("entity_id", "")).partition(".")[0] != "sensor":
+        return False
     attrs = state.get("attributes", {})
     text = " ".join((str(state.get("entity_id", "")), str(attrs.get("friendly_name", "")))).lower()
     unit = attrs.get("unit_of_measurement", "")
@@ -91,6 +93,28 @@ def is_inverter_power(state):
     return power_measurement and "inverter" in text and not placeholder and not any(
         term in text for term in ("lifetime", "total", "array", "meter", "mppt")
     )
+
+
+def grouped_incidents(assets, findings):
+    incidents = []
+    stale = [item for item in findings if any("stale" in symptom.lower() for symptom in item["symptoms"])]
+    unavailable = [item for item in findings if any("unavailable" in symptom.lower() for symptom in item["symptoms"])]
+    threshold = max(3, len(assets) // 2)
+    if len(stale) >= threshold:
+        incidents.append({
+            "severity": "degraded",
+            "title": "Fleet telemetry is not refreshing",
+            "evidence": "%d of %d monitored panel inverters have stale measurements." % (len(stale), len(assets)),
+            "action": "Reload the solar integration and verify the PVS gateway connection. Treat this as one communications incident, not %d panel failures." % len(stale),
+        })
+    if len(unavailable) >= threshold:
+        incidents.append({
+            "severity": "critical",
+            "title": "Fleet telemetry is unavailable",
+            "evidence": "%d of %d monitored panel inverters are unavailable." % (len(unavailable), len(assets)),
+            "action": "Check the PVS gateway and Home Assistant integration before inspecting individual panels.",
+        })
+    return incidents
 
 
 def is_solar(state):
@@ -204,6 +228,7 @@ def scan():
         },
         "assets": sorted(assets, key=lambda a: a["health_score"]),
         "findings": findings,
+        "incidents": grouped_incidents(assets, findings),
         "error": None,
     }
 
@@ -257,7 +282,7 @@ def scanner_loop():
 PAGE = """<!doctype html><html><head><meta charset=utf-8><meta name=viewport content='width=device-width'>
 <title>Solar Assistant</title><style>:root{color-scheme:dark;font-family:system-ui;background:#101214;color:#e8eaed}body{margin:0;padding:24px}header{display:flex;justify-content:space-between;align-items:center;gap:12px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px}.card{background:#1c1f22;border:1px solid #34383d;border-radius:12px;padding:18px;margin:14px 0}.metric{font-size:2rem;font-weight:700}.attention{border-left:5px solid #ff7043}.muted{color:#9aa0a6}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:10px;border-bottom:1px solid #34383d}.healthy{color:#4caf50}.watch{color:#ffc107}.degraded,.critical{color:#ff7043}button{background:#03a9f4;border:0;border-radius:8px;color:#fff;padding:10px 14px}@media(max-width:700px){body{padding:12px}table{font-size:.85rem}th:nth-child(2),td:nth-child(2){display:none}}</style></head>
 <body><header><div><h1>Solar Assistant</h1><div class=muted>Daylight-aware, peer-relative solar health</div></div><button onclick='load(true)'>Scan now</button></header><div id=error></div><div class=grid id=summary></div><section id=attention></section><div class=card><h2>Solar panels</h2><table><thead><tr><th>Panel inverter</th><th>State</th><th>Health</th><th>Peer performance</th><th>Finding and recommended action</th></tr></thead><tbody id=assets></tbody></table></div>
-<script>const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));async function load(force=false){let r=await fetch(force?'api/scan':'api/status',{method:force?'POST':'GET'}),d=await r.json();error.innerHTML=d.error?'<div class="card critical">'+esc(d.error)+'</div>':'';let s=d.summary||{},sun=s.daylight?'Solar elevation':'Monitoring paused';summary.innerHTML=[['System health',s.health_score??0],['Panels needing attention',s.attention??0],['Peer median',(s.peer_median_w??'—')+' W'],[sun,s.solar_elevation==null?'—':s.solar_elevation+'° above horizon']].map(x=>'<div class=card><div class=muted>'+esc(x[0])+'</div><div class=metric>'+esc(x[1])+'</div></div>').join('');let fs=d.findings||[];attention.innerHTML=fs.length?'<div class="card attention"><h2>Attention required</h2>'+fs.map(f=>'<p><strong>'+esc(f.entity_id)+'</strong> — '+esc(f.symptoms.join(', '))+'<br><span class=muted>Recommended: '+esc(f.recommendation)+'</span></p>').join('')+(d.analysis?'<p><strong>Local AI assessment:</strong> '+esc(d.analysis)+'</p>':'')+'</div>':'<div class=card><h2>No persistent panel anomalies</h2><div class=muted>Production comparisons run only during useful daylight.</div></div>';assets.innerHTML=(d.assets||[]).map(a=>'<tr><td>'+esc(a.name)+'<br><span class=muted>'+esc(a.entity_id)+'</span></td><td>'+esc(a.state)+' '+esc(a.unit||'')+'</td><td class='+esc(a.status)+'>'+esc(a.health_score)+' · '+esc(a.status)+'</td><td>'+esc(a.peer_ratio==null?'—':Math.round(a.peer_ratio*100)+'%')+'</td><td>'+esc(a.symptoms.join(', ')||'No active finding')+'</td></tr>').join('')}load();setInterval(load,60000)</script></body></html>"""
+<script>const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));async function load(force=false){let r=await fetch(force?'api/scan':'api/status',{method:force?'POST':'GET'}),d=await r.json();error.innerHTML=d.error?'<div class="card critical">'+esc(d.error)+'</div>':'';let s=d.summary||{},sun=s.daylight?'Solar elevation':'Monitoring paused';summary.innerHTML=[['System health',s.health_score??0],['Panels needing attention',s.attention??0],['Peer median',(s.peer_median_w??'—')+' W'],[sun,s.solar_elevation==null?'—':s.solar_elevation+'° above horizon']].map(x=>'<div class=card><div class=muted>'+esc(x[0])+'</div><div class=metric>'+esc(x[1])+'</div></div>').join('');let fs=d.findings||[],ins=d.incidents||[],shown=fs.slice(0,10);attention.innerHTML=(fs.length||ins.length)?'<div class="card attention"><h2>Attention required</h2>' +ins.map(i=>'<p><strong>'+esc(i.title)+'</strong><br>'+esc(i.evidence)+'<br><span class=muted>Recommended: '+esc(i.action)+'</span></p>').join('')+shown.map(f=>'<p><strong>'+esc(f.entity_id)+'</strong> — '+esc(f.symptoms.join(', '))+'<br><span class=muted>Recommended: '+esc(f.recommendation)+'</span></p>').join('')+(d.analysis?'<p><strong>Local AI assessment:</strong> '+esc(d.analysis)+'</p>':'')+'</div>':'<div class=card><h2>No persistent panel anomalies</h2><div class=muted>Production comparisons run only during useful daylight.</div></div>';assets.innerHTML=(d.assets||[]).map(a=>'<tr><td>'+esc(a.name)+'<br><span class=muted>'+esc(a.entity_id)+'</span></td><td>'+esc(a.state)+' '+esc(a.unit||'')+'</td><td class='+esc(a.status)+'>'+esc(a.health_score)+' · '+esc(a.status)+'</td><td>'+esc(a.peer_ratio==null?'—':Math.round(a.peer_ratio*100)+'%')+'</td><td>'+esc(a.symptoms.join(', ')||'No active finding')+'</td></tr>').join('')}load();setInterval(load,60000)</script></body></html>"""
 
 
 class Handler(BaseHTTPRequestHandler):

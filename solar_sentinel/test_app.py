@@ -42,6 +42,20 @@ class SolarHealthTests(unittest.TestCase):
         state = power_state("sensor.inverter_e001_power", "unavailable", "kW")
         self.assertTrue(app.is_inverter_power(state))
 
+    def test_binary_inverter_state_is_not_power_telemetry(self):
+        state = power_state("binary_sensor.inverter_e001_state", "on", "W")
+        self.assertFalse(app.is_inverter_power(state))
+
+    def test_fleet_staleness_becomes_one_incident(self):
+        assets = [{"entity_id": "sensor.inverter_%d_power" % i} for i in range(4)]
+        findings = [
+            {"entity_id": item["entity_id"], "severity": "degraded", "symptoms": ["Telemetry stale for 60 minutes"]}
+            for item in assets
+        ]
+        incidents = app.grouped_incidents(assets, findings)
+        self.assertEqual(len(incidents), 1)
+        self.assertIn("one communications incident", incidents[0]["action"])
+
     def test_low_output_is_not_penalized_at_night(self):
         score, symptoms, ratio, _, _ = app.assess(
             power_state("sensor.inverter_1", 0), self.cfg,

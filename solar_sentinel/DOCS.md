@@ -10,6 +10,7 @@ Solar Assistant discovers panel-level inverter power entities and assigns conser
 - The fixed watt threshold is used only as a fallback when too few peer inverters are available.
 - Ollama explains deterministic findings; it does not decide whether equipment is unhealthy.
 - Static diagnostics, IP addresses, lifetime counters, and placeholder n/a entities are excluded from panel-health alerts.
+- Binary state sensors are not treated as changing power telemetry. Fleet-wide stale or unavailable measurements are grouped as one gateway/integration incident.
 
 ## Boundaries
 

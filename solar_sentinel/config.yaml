@@ -1,5 +1,5 @@
 name: Solar Assistant
-version: "0.2.1"
+version: "0.2.2"
 slug: solar_sentinel
 description: Local-first solar equipment inventory and health monitoring
 url: https://github.com/cpfcoaching/AI-Home-Assistant-Architect
