@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import json
 import os
+import statistics
 import urllib.request
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from threading import Lock
+from threading import Lock, Thread
+from time import sleep
 
 CORE_API = "http://supervisor/core/api"
 TOKEN = os.environ.get("SUPERVISOR_TOKEN", "")
@@ -15,10 +17,18 @@ OPTIONS_PATH = Path("/data/options.json")
 SOLAR_HINTS = ("solar", "pv", "photovoltaic", "inverter", "pvs", "sunpower", "enphase")
 lock = Lock()
 cache = {"generated_at": None, "summary": {}, "assets": [], "findings": [], "error": None}
+breaches = {}
+ollama_cache = {"signature": None, "analysis": None}
 
 
 def options():
-    cfg = {"stale_after_minutes": 30, "low_production_threshold_w": 100}
+    cfg = {
+        "stale_after_minutes": 30, "low_production_threshold_w": 100,
+        "minimum_solar_elevation": 10, "minimum_peer_power_w": 75,
+        "peer_watch_ratio": 0.85, "peer_critical_ratio": 0.50,
+        "anomaly_persistence_minutes": 30, "scan_interval_minutes": 5,
+        "ollama_url": "", "ollama_model": "qwen3:8b",
+    }
     try:
         cfg.update(json.loads(OPTIONS_PATH.read_text()))
     except (OSError, ValueError):
@@ -33,6 +43,50 @@ def api_get(path):
     )
     with urllib.request.urlopen(req, timeout=15) as response:
         return json.load(response)
+
+
+def parse_float(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def watts_for(state):
+    attrs = state.get("attributes", {})
+    unit = attrs.get("unit_of_measurement", "")
+    if attrs.get("device_class") != "power" and unit not in {"W", "kW"}:
+        return None
+    value = parse_float(state.get("state"))
+    return None if value is None else value * (1000 if unit == "kW" else 1)
+
+
+def age_minutes(state, now):
+    changed = state.get("last_updated") or state.get("last_changed")
+    if not changed:
+        return None
+    try:
+        stamp = datetime.fromisoformat(changed.replace("Z", "+00:00"))
+        return max(0, (now - stamp).total_seconds() / 60)
+    except ValueError:
+        return None
+
+
+def daylight_context(states, cfg):
+    sun = next((state for state in states if state.get("entity_id") == "sun.sun"), {})
+    elevation = parse_float(sun.get("attributes", {}).get("elevation"))
+    daylight = sun.get("state") == "above_horizon"
+    if elevation is not None:
+        daylight = daylight and elevation >= cfg["minimum_solar_elevation"]
+    return {"daylight": daylight, "solar_elevation": elevation}
+
+
+def is_inverter_power(state):
+    if watts_for(state) is None:
+        return False
+    attrs = state.get("attributes", {})
+    text = " ".join((str(state.get("entity_id", "")), str(attrs.get("friendly_name", "")))).lower()
+    return "inverter" in text and not any(term in text for term in ("total", "array", "meter"))
 
 
 def is_solar(state):
@@ -50,41 +104,52 @@ def is_solar(state):
     return not any(term in text for term in excluded)
 
 
-def assess(state, cfg):
+def assess(state, cfg, context, peer_median, now):
     score, symptoms = 100, []
     value = str(state.get("state", "")).lower()
-    attrs = state.get("attributes", {})
     if value in {"unknown", "unavailable", "none", ""}:
-        return 20, ["Telemetry unavailable"]
-    changed = state.get("last_updated") or state.get("last_changed")
-    if changed:
-        try:
-            stamp = datetime.fromisoformat(changed.replace("Z", "+00:00"))
-            age = (datetime.now(timezone.utc) - stamp).total_seconds() / 60
-            if age > cfg["stale_after_minutes"]:
-                score -= 35
-                symptoms.append("Telemetry stale for %d minutes" % int(age))
-        except ValueError:
-            pass
-    unit = attrs.get("unit_of_measurement", "")
-    if attrs.get("device_class") == "power" or unit in {"W", "kW"}:
-        try:
-            watts = float(value) * (1000 if unit == "kW" else 1)
-            if watts < cfg["low_production_threshold_w"]:
+        return 20, ["Telemetry unavailable"], None, None, None
+    watts = watts_for(state)
+    age = age_minutes(state, now)
+    if age is not None and age > cfg["stale_after_minutes"] and (watts is None or context["daylight"]):
+        score -= 35
+        symptoms.append("Telemetry stale for %d minutes" % int(age))
+
+    peer_ratio = None
+    if watts is not None and context["daylight"] and peer_median and is_inverter_power(state):
+        peer_ratio = watts / peer_median
+        key = state["entity_id"]
+        if peer_ratio < cfg["peer_watch_ratio"] and peer_median >= cfg["minimum_peer_power_w"]:
+            started = breaches.setdefault(key, now)
+            duration = (now - started).total_seconds() / 60
+            if duration >= cfg["anomaly_persistence_minutes"]:
+                score -= 65 if peer_ratio <= cfg["peer_critical_ratio"] else 35
+                symptoms.append("Producing %d%% of peer median for %d minutes" % (round(peer_ratio * 100), int(duration)))
+            else:
                 score -= 10
-                symptoms.append("Production below configured threshold")
-        except ValueError:
-            score -= 15
-            symptoms.append("Non-numeric production value")
-    return max(0, score), symptoms
+                symptoms.append("Low peer performance under observation (%d%%)" % round(peer_ratio * 100))
+        else:
+            breaches.pop(key, None)
+    elif watts is not None and context["daylight"] and peer_median is None and watts < cfg["low_production_threshold_w"]:
+        score -= 10
+        symptoms.append("Production below fallback threshold")
+    else:
+        breaches.pop(state.get("entity_id"), None)
+    return max(0, score), symptoms, peer_ratio, watts, age
 
 
 def scan():
     cfg, assets, findings = options(), [], []
-    for state in api_get("/states"):
+    states = api_get("/states")
+    now = datetime.now(timezone.utc)
+    context = daylight_context(states, cfg)
+    peer_values = [watts_for(state) for state in states if is_solar(state) and is_inverter_power(state)]
+    peer_values = [value for value in peer_values if value is not None and value >= 0]
+    peer_median = statistics.median(peer_values) if len(peer_values) >= 3 else None
+    for state in states:
         if not is_solar(state):
             continue
-        score, symptoms = assess(state, cfg)
+        score, symptoms, peer_ratio, watts, age = assess(state, cfg, context, peer_median, now)
         status = "critical" if score < 40 else "degraded" if score < 70 else "watch" if score < 90 else "healthy"
         asset = {
             "entity_id": state["entity_id"],
@@ -94,18 +159,24 @@ def scan():
             "health_score": score,
             "status": status,
             "symptoms": symptoms,
+            "power_w": round(watts, 1) if watts is not None else None,
+            "peer_ratio": round(peer_ratio, 3) if peer_ratio is not None else None,
+            "age_minutes": round(age, 1) if age is not None else None,
         }
         assets.append(asset)
-        if symptoms:
+        if status != "healthy":
             findings.append({"entity_id": state["entity_id"], "severity": status, "symptoms": symptoms})
     average = round(sum(a["health_score"] for a in assets) / len(assets)) if assets else 0
     return {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": now.isoformat(),
         "summary": {
             "health_score": average,
             "assets": len(assets),
             "healthy": sum(a["status"] == "healthy" for a in assets),
             "attention": sum(a["status"] != "healthy" for a in assets),
+            "daylight": context["daylight"],
+            "solar_elevation": context["solar_elevation"],
+            "peer_median_w": round(peer_median, 1) if peer_median is not None else None,
         },
         "assets": sorted(assets, key=lambda a: a["health_score"]),
         "findings": findings,
@@ -113,10 +184,38 @@ def scan():
     }
 
 
+def ollama_analysis(result, cfg):
+    findings = result.get("findings", [])
+    if not findings or not cfg.get("ollama_url"):
+        return None
+    signature = json.dumps(findings, sort_keys=True)
+    if ollama_cache["signature"] == signature:
+        return ollama_cache["analysis"]
+    prompt = (
+        "You are a solar monitoring assistant. Summarize these deterministic Home Assistant "
+        "findings in at most 3 short sentences. Do not invent causes; label possible causes as "
+        "possibilities and recommend a safe inspection step. Findings: " + signature
+    )
+    request = urllib.request.Request(
+        cfg["ollama_url"].rstrip("/") + "/api/generate",
+        data=json.dumps({"model": cfg["ollama_model"], "prompt": prompt, "stream": False}).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=45) as response:
+            analysis = json.load(response).get("response")
+    except Exception as exc:
+        analysis = "Ollama analysis unavailable: %s" % exc
+    ollama_cache.update(signature=signature, analysis=analysis)
+    return analysis
+
+
 def refresh():
     global cache
     try:
+        cfg = options()
         result = scan()
+        result["analysis"] = ollama_analysis(result, cfg)
     except Exception as exc:
         result = dict(cache)
         result.update(error=str(exc), generated_at=datetime.now(timezone.utc).isoformat())
@@ -125,10 +224,16 @@ def refresh():
     return result
 
 
+def scanner_loop():
+    while True:
+        sleep(max(1, options()["scan_interval_minutes"]) * 60)
+        refresh()
+
+
 PAGE = """<!doctype html><html><head><meta charset=utf-8><meta name=viewport content='width=device-width'>
-<title>Solar Sentinel</title><style>:root{color-scheme:dark;font-family:system-ui;background:#101214;color:#e8eaed}body{margin:0;padding:24px}header{display:flex;justify-content:space-between;align-items:center}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px}.card{background:#1c1f22;border:1px solid #34383d;border-radius:12px;padding:18px;margin:14px 0}.metric{font-size:2rem;font-weight:700}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:10px;border-bottom:1px solid #34383d}.healthy{color:#4caf50}.watch{color:#ffc107}.degraded,.critical{color:#ff7043}button{background:#03a9f4;border:0;border-radius:8px;color:#fff;padding:10px 14px}small{color:#9aa0a6}</style></head>
-<body><header><div><h1>Solar Sentinel</h1><small>Read-only solar health and inventory</small></div><button onclick='load(true)'>Scan now</button></header><div id=error></div><div class=grid id=summary></div><div class=card><h2>Solar assets</h2><table><thead><tr><th>Asset</th><th>State</th><th>Health</th><th>Finding</th></tr></thead><tbody id=assets></tbody></table></div>
-<script>const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));async function load(force=false){let r=await fetch(force?'api/scan':'api/status',{method:force?'POST':'GET'}),d=await r.json();error.innerHTML=d.error?'<div class="card critical">'+esc(d.error)+'</div>':'';let s=d.summary||{};summary.innerHTML=[['System health',s.health_score||0],['Discovered assets',s.assets||0],['Healthy',s.healthy||0],['Need attention',s.attention||0]].map(x=>'<div class=card><small>'+esc(x[0])+'</small><div class=metric>'+esc(x[1])+'</div></div>').join('');assets.innerHTML=(d.assets||[]).map(a=>'<tr><td>'+esc(a.name)+'<br><small>'+esc(a.entity_id)+'</small></td><td>'+esc(a.state)+' '+esc(a.unit||'')+'</td><td class='+esc(a.status)+'>'+esc(a.health_score)+' · '+esc(a.status)+'</td><td>'+esc(a.symptoms.join(', ')||'No active finding')+'</td></tr>').join('')}load();setInterval(load,300000)</script></body></html>"""
+<title>Solar Sentinel</title><style>:root{color-scheme:dark;font-family:system-ui;background:#101214;color:#e8eaed}body{margin:0;padding:24px}header{display:flex;justify-content:space-between;align-items:center;gap:12px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px}.card{background:#1c1f22;border:1px solid #34383d;border-radius:12px;padding:18px;margin:14px 0}.metric{font-size:2rem;font-weight:700}.attention{border-left:5px solid #ff7043}.muted{color:#9aa0a6}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:10px;border-bottom:1px solid #34383d}.healthy{color:#4caf50}.watch{color:#ffc107}.degraded,.critical{color:#ff7043}button{background:#03a9f4;border:0;border-radius:8px;color:#fff;padding:10px 14px}@media(max-width:700px){body{padding:12px}table{font-size:.85rem}th:nth-child(2),td:nth-child(2){display:none}}</style></head>
+<body><header><div><h1>Solar Sentinel</h1><div class=muted>Daylight-aware, peer-relative solar health</div></div><button onclick='load(true)'>Scan now</button></header><div id=error></div><div class=grid id=summary></div><section id=attention></section><div class=card><h2>Solar assets</h2><table><thead><tr><th>Asset</th><th>State</th><th>Health</th><th>Peer performance</th><th>Finding</th></tr></thead><tbody id=assets></tbody></table></div>
+<script>const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));async function load(force=false){let r=await fetch(force?'api/scan':'api/status',{method:force?'POST':'GET'}),d=await r.json();error.innerHTML=d.error?'<div class="card critical">'+esc(d.error)+'</div>':'';let s=d.summary||{},sun=s.daylight?'Daylight':'Monitoring paused';summary.innerHTML=[['System health',s.health_score??0],['Need attention',s.attention??0],['Peer median',(s.peer_median_w??'—')+' W'],[sun,s.solar_elevation==null?'—':s.solar_elevation+'°']].map(x=>'<div class=card><div class=muted>'+esc(x[0])+'</div><div class=metric>'+esc(x[1])+'</div></div>').join('');let fs=d.findings||[];attention.innerHTML=fs.length?'<div class="card attention"><h2>Attention required</h2>'+fs.map(f=>'<p><strong>'+esc(f.entity_id)+'</strong> — '+esc(f.symptoms.join(', '))+'</p>').join('')+(d.analysis?'<p><strong>Local AI assessment:</strong> '+esc(d.analysis)+'</p>':'')+'</div>':'<div class=card><h2>No persistent panel anomalies</h2><div class=muted>Production comparisons run only during useful daylight.</div></div>';assets.innerHTML=(d.assets||[]).map(a=>'<tr><td>'+esc(a.name)+'<br><span class=muted>'+esc(a.entity_id)+'</span></td><td>'+esc(a.state)+' '+esc(a.unit||'')+'</td><td class='+esc(a.status)+'>'+esc(a.health_score)+' · '+esc(a.status)+'</td><td>'+esc(a.peer_ratio==null?'—':Math.round(a.peer_ratio*100)+'%')+'</td><td>'+esc(a.symptoms.join(', ')||'No active finding')+'</td></tr>').join('')}load();setInterval(load,60000)</script></body></html>"""
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -164,5 +269,6 @@ if __name__ == "__main__":
     if not TOKEN:
         raise SystemExit("SUPERVISOR_TOKEN is required")
     refresh()
+    Thread(target=scanner_loop, daemon=True).start()
     print("Solar Sentinel listening on port 8099", flush=True)
     ThreadingHTTPServer(("0.0.0.0", 8099), Handler).serve_forever()

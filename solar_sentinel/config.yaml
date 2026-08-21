@@ -1,5 +1,5 @@
 name: Solar Sentinel
-version: "0.1.2"
+version: "0.2.0"
 slug: solar_sentinel
 description: Local-first solar equipment inventory and health monitoring
 url: https://github.com/cpfcoaching/AI-Home-Assistant-Architect
@@ -21,10 +21,22 @@ backup: hot
 options:
   stale_after_minutes: 30
   low_production_threshold_w: 100
+  minimum_solar_elevation: 10
+  minimum_peer_power_w: 75
+  peer_watch_ratio: 0.85
+  peer_critical_ratio: 0.50
+  anomaly_persistence_minutes: 30
+  scan_interval_minutes: 5
   ollama_url: ""
   ollama_model: qwen3:8b
 schema:
   stale_after_minutes: int(5,1440)
   low_production_threshold_w: int(0,100000)
+  minimum_solar_elevation: int(-10,90)
+  minimum_peer_power_w: int(0,10000)
+  peer_watch_ratio: float(0.1,1.0)
+  peer_critical_ratio: float(0.1,1.0)
+  anomaly_persistence_minutes: int(5,1440)
+  scan_interval_minutes: int(1,60)
   ollama_url: str?
   ollama_model: str

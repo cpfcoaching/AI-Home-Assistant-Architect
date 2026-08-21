@@ -1,12 +1,20 @@
 # Solar Sentinel
 
-Solar Sentinel discovers solar-related Home Assistant entities and assigns conservative health scores based on availability, telemetry freshness, and a configured low-production threshold.
+Solar Sentinel discovers solar-related Home Assistant entities and assigns conservative health scores based on availability, telemetry freshness, daylight, and performance relative to peer inverters.
 
-## Version 0.1.0 boundaries
+## Health model
+
+- Production is evaluated only while the sun is above the configured minimum elevation.
+- Each inverter is compared with the median output of the inverter fleet.
+- A low peer ratio must persist for the configured duration before it becomes a degraded or critical finding.
+- The fixed watt threshold is used only as a fallback when too few peer inverters are available.
+- Ollama explains deterministic findings; it does not decide whether equipment is unhealthy.
+
+## Boundaries
 
 - Read-only. It cannot control equipment or edit automations.
-- Threshold findings do not yet account for sunrise, weather, or seasonal baselines.
-- Warranty evidence and Ollama analysis follow baseline validation.
+- Peer groups currently include all discovered inverter power sensors; roof-orientation groups and weather-normalized seasonal baselines remain future work.
+- Warranty evidence follows longer-term baseline validation.
 
 ## Installation
 
