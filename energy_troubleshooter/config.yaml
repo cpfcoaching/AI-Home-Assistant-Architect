@@ -1,5 +1,5 @@
 name: Energy Data Troubleshooter
-version: "0.1.2"
+version: "0.2.0"
 slug: energy_troubleshooter
 description: Read-only SmartHub, Energy dashboard, tariff, and solar-value diagnostics
 url: https://github.com/cpfcoaching/AI-Home-Assistant-Architect
